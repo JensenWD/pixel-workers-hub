@@ -65,7 +65,8 @@ public enum HookInstaller {
         var current = url.standardizedFileURL
         for _ in 0..<16 {
             guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: current.path) else { return current }
-            current = URL(fileURLWithPath: target, relativeTo: current.deletingLastPathComponent()).standardizedFileURL
+            // A relative target is relative to the link's real folder, which may itself be behind a link.
+            current = URL(fileURLWithPath: target, relativeTo: current.deletingLastPathComponent().resolvingSymlinksInPath()).standardizedFileURL
         }
         return current
     }

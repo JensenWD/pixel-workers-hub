@@ -156,8 +156,11 @@ final class HookTests: XCTestCase {
         XCTAssertEqual(row?.status, .running)
         try send("Stop", ["background_tasks": []])
         XCTAssertEqual(row?.status, .done)
+        let finished = row?.updatedAt
+        Thread.sleep(forTimeInterval: 0.01)
         try send("Notification", ["notification_type": "idle_prompt"])
         XCTAssertEqual(row?.status, .done)
+        XCTAssertEqual(row?.updatedAt, finished)
         try send("Stop", ["background_tasks": [["id": "1"]]])
         XCTAssertEqual(row?.status, .running)
         XCTAssertEqual(row?.backgroundCount, 1)
@@ -290,6 +293,21 @@ final class InstallerTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: settings.path, withDestinationPath: "dotfiles/settings.json")
         XCTAssertTrue(try HookInstaller.install(executable: "/x/PixelWorkersHub", settings: settings, backups: backups))
         XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: settings.path), "dotfiles/settings.json")
+        XCTAssertTrue(try String(contentsOf: real, encoding: .utf8).contains(HookInstaller.flag))
+    }
+
+    func testFollowsARelativeLinkInsideALinkedFolder() throws {
+        // ~/.claude -> dotfiles/claude, and settings.json -> ../shared/settings.json inside it.
+        let fm = FileManager.default
+        let home = dir.appendingPathComponent("home"), real = dir.appendingPathComponent("dotfiles/shared/settings.json")
+        try fm.createDirectory(at: dir.appendingPathComponent("dotfiles/claude"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: real.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: home, withIntermediateDirectories: true)
+        try existing.write(to: real, atomically: true, encoding: .utf8)
+        try fm.createSymbolicLink(atPath: home.appendingPathComponent(".claude").path, withDestinationPath: dir.appendingPathComponent("dotfiles/claude").path)
+        try fm.createSymbolicLink(atPath: dir.appendingPathComponent("dotfiles/claude/settings.json").path, withDestinationPath: "../shared/settings.json")
+        let link = home.appendingPathComponent(".claude/settings.json")
+        XCTAssertTrue(try HookInstaller.install(executable: "/x/PixelWorkersHub", settings: link, backups: backups))
         XCTAssertTrue(try String(contentsOf: real, encoding: .utf8).contains(HookInstaller.flag))
     }
 

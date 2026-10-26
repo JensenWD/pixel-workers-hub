@@ -23,6 +23,11 @@ public enum Terminals {
     public static func host(of pid: Int32) -> NSRunningApplication? {
         for ancestor in Processes.lineage(of: pid).dropFirst() {
             if let app = NSRunningApplication(processIdentifier: ancestor), app.activationPolicy == .regular { return app }
+            // iTerm2 keeps its shells in a server process that outlives iTerm2 restarts, after which it no
+            // longer descends from iTerm2.
+            if Processes.executable(of: ancestor)?.contains("/iTerm2/iTermServer") == true {
+                return NSRunningApplication.runningApplications(withBundleIdentifier: iterm).first
+            }
         }
         return nil
     }

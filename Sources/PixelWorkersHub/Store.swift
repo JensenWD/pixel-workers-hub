@@ -31,7 +31,7 @@ final class Store {
     }
 
     private func update(full: Bool) {
-        if full || live == nil {
+        if full {
             if let claude = Paths.claude() {
                 let polled = (Date().timeIntervalSince1970 * 1000).rounded()
                 do { live = try Sessions.live(claude: claude); livePolledAt = polled; liveError = nil }

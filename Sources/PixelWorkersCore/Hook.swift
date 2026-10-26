@@ -78,6 +78,9 @@ public enum Hook {
 
         let file = directory.appendingPathComponent(sid + ".json")
         let previous = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(HookRecord.self, from: $0) }
+        // Claude has been idle a while: nothing happened, so the record stays as it was. Touching its time
+        // would make an old status look newer than Claude Code's own list.
+        if event == "Notification", input["notification_type"] as? String == "idle_prompt", previous != nil { return }
         guard let status = status(after: input, previous: event == "SessionStart" ? nil : previous?.status) else { return }
         var row = HookRecord(sessionId: sid, status: status, event: event, updatedAt: (now.timeIntervalSince1970 * 1000).rounded())
         row.pid = claudePid ?? previous?.pid
