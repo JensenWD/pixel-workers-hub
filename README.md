@@ -96,12 +96,13 @@ Notes on the hooks:
 
 - **What they record:** each hook writes one small file per session to
   `~/Library/Application Support/Pixel Workers Hub/sessions/`. It holds only the session ID, its status,
-  the event name, a timestamp, the Claude process ID and the working folder. Prompts, transcripts, tool
-  inputs and outputs are never written.
+  the event name, a timestamp, the Claude process ID, the working folder and the session's title (the
+  name Claude Code shows for it). Prompts, transcripts, tool inputs and outputs are never written.
 - **Speed and safety:** the hook is the app's own binary. It runs in about 10 ms, prints nothing, always
   exits successfully and never blocks Claude.
-- **Your settings:** your other settings and hooks are left exactly as they were, in the same order. A
-  backup of `settings.json` is saved next to the status files before every change.
+- **Your settings:** your other settings and hooks are kept, in the same order. The file is written back
+  with 2-space indentation. A backup of `settings.json` is saved next to the status files before every
+  change. A `settings.json` linked in from a dotfiles folder is updated where it really lives.
 - **Existing sessions:** sessions started after you turn this on report detailed status. Restart the ones
   already open to include them.
 - **Turning it off:** click **Options → Detailed Status** again. That removes the hooks and the status files.
@@ -138,6 +139,10 @@ their folder. Naming a session (`/rename` in Claude Code) makes the match exact.
 **System Settings → Privacy & Security → Automation**. If you built the app yourself, each rebuild gets a
 new signature, and macOS may ask again.
 
+**You use `CLAUDE_CONFIG_DIR`.** Apps opened from Finder don't see variables set in your shell, so the
+hooks go into `~/.claude/settings.json`. Run `"$APP" --install-hooks` from a terminal where the variable
+is set instead.
+
 **Detailed status stopped working after moving the app.** The hooks run the app from where it was when
 you turned them on. If that copy is gone, the app repairs the hooks the next time it opens. Otherwise,
 turn detailed status off and on again.
@@ -156,8 +161,9 @@ instead, turn off **Detailed Status** from the Options menu first, then quit the
 - **The session list** comes from `claude agents --json`, Claude Code's own list of what's running. It's
   polled every 3 seconds while the panel is open and every 20 seconds otherwise.
 - **The hooks' status files** are watched, so a permission prompt or a finished turn shows the moment it
-  happens, with no polling. Claude Code's list has the last word on what's on screen right now, so a
-  prompt dismissed with Esc (which fires no hook) still clears. On versions of Claude Code from before
+  happens, with no polling. Whichever is newer wins: a hook that fired after the last look decides, and
+  the next look overrules a hook that didn't fire. That's how a prompt dismissed with Esc, which fires no
+  hook, still clears. On versions of Claude Code from before
   `claude agents`, the status files alone list the sessions.
 - **Finding the tab:** the terminal is found by walking up from the Claude process to the app that
   started it. Ghostty tabs are matched by title and folder. iTerm2 and Terminal tabs are matched by tty.

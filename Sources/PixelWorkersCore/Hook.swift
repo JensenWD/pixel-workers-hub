@@ -56,9 +56,8 @@ public enum Hook {
         case "StopFailure": return .failed
         case "SessionEnd": return .ended
         case "Notification":
-            // Claude has been idle a while: that doesn't change what it last did.
-            if input["notification_type"] as? String == "idle_prompt" { return previous ?? .ready }
-            return .needsInput
+            // An idle reminder with nothing recorded yet: the session is open and hasn't been given anything.
+            return input["notification_type"] as? String == "idle_prompt" ? .ready : .needsInput
         default: return nil
         }
     }
@@ -78,9 +77,10 @@ public enum Hook {
 
         let file = directory.appendingPathComponent(sid + ".json")
         let previous = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(HookRecord.self, from: $0) }
-        // Claude has been idle a while: nothing happened, so the record stays as it was. Touching its time
-        // would make an old status look newer than Claude Code's own list.
-        if event == "Notification", input["notification_type"] as? String == "idle_prompt", previous != nil { return }
+        // Claude has been idle a while, or compacted its context: nothing about the turn changed, so the
+        // record stays as it was. Touching its time would make an old status look newer than Claude Code's list.
+        if previous != nil, event == "Notification" && input["notification_type"] as? String == "idle_prompt"
+            || event == "SessionStart" && input["source"] as? String == "compact" { return }
         guard let status = status(after: input, previous: event == "SessionStart" ? nil : previous?.status) else { return }
         var row = HookRecord(sessionId: sid, status: status, event: event, updatedAt: (now.timeIntervalSince1970 * 1000).rounded())
         row.pid = claudePid ?? previous?.pid

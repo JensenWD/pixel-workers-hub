@@ -169,6 +169,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         // The status folder was just created or removed; watch the one that's there now.
         store.watchHooks()
         store.refresh(full: false)
+        // From the menu-bar menu, with the panel closed, the outcome would otherwise go unseen.
+        if !popover.isShown, let notice {
+            self.notice = nil
+            alert(hooksOn ? "Detailed status is on" : "Detailed status is off", notice)
+        }
         render()
     }
 

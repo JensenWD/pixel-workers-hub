@@ -24,20 +24,34 @@ final class Store {
     private var hosts: [Int32: String] = [:]
     private var watcher: DispatchSourceFileSystemObject?
     private var mergePending = false
+    /// When asking for the list last failed (ms), so a hook change can try again soon, but not every time.
+    private var liveFailedAt: Double = 0
+    // A full refresh already waiting on the queue; a stalled claude shouldn't pile more up behind it.
+    private let fullQueued = NSLock()
+    private var fullWaiting = false
 
     /// full: also ask Claude Code which sessions are open; otherwise only re-read the hook's files.
     func refresh(full: Bool) {
-        queue.async { [self] in update(full: full) }
+        if full {
+            fullQueued.lock(); defer { fullQueued.unlock() }
+            if fullWaiting { return }
+            fullWaiting = true
+        }
+        queue.async { [self] in
+            if full { fullQueued.lock(); fullWaiting = false; fullQueued.unlock() }
+            update(full: full)
+        }
     }
 
     private func update(full: Bool) {
-        if full {
+        let now = (Date().timeIntervalSince1970 * 1000).rounded()
+        if full || live == nil && now - liveFailedAt > 10_000 {
             if let claude = Paths.claude() {
-                let polled = (Date().timeIntervalSince1970 * 1000).rounded()
-                do { live = try Sessions.live(claude: claude); livePolledAt = polled; liveError = nil }
-                catch { live = nil; liveError = "Claude Code didn’t list its sessions (\(error)). Try `claude update`." }
+                do { live = try Sessions.live(claude: claude); livePolledAt = now; liveError = nil }
+                catch { live = nil; liveFailedAt = now; liveError = "Claude Code didn’t list its sessions (\(error)). Try `claude update`." }
             } else {
                 live = nil
+                liveFailedAt = now
                 liveError = "Couldn’t find the claude command. Point to it with: defaults write io.github.jensenwd.pixel-workers-hub claudePath /path/to/claude"
             }
         }
@@ -47,8 +61,9 @@ final class Store {
         hosts = hosts.filter { pids.contains($0.key) }
         for i in sessions.indices {
             guard let pid = sessions[i].pid else { continue }
-            if hosts[pid] == nil { hosts[pid] = Terminals.host(of: pid)?.localizedName ?? "" }
-            sessions[i].terminal = hosts[pid].flatMap { $0.isEmpty ? nil : $0 }
+            // Only found apps are remembered: a terminal that was closed may be opened again.
+            if hosts[pid] == nil { hosts[pid] = Terminals.host(of: pid)?.localizedName }
+            sessions[i].terminal = hosts[pid]
         }
         let next = Snapshot(sessions: sessions, error: live == nil && sessions.isEmpty ? liveError : nil)
         guard next != current else { return }
