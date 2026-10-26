@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src data:">
+  <title>Pixel Workers Hub</title>
+  <link rel="stylesheet" href="panel.css">
+  <script src="sprites.js" defer></script>
+  <script src="panel.js" defer></script>
+</head>
+<body>
+  <div id="defs"></div>
+  <header class="top">
+    <span class="micro">Claude Code</span>
+    <span class="micro" id="tally"></span>
+  </header>
+  <ul id="list" class="list"></ul>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+  <footer class="foot">
+    <span id="hooks"></span>
+    <button id="options" class="link" type="button">Options</button>
+  </footer>
+</body>
+</html>
