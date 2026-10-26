@@ -47,6 +47,17 @@ final class StatusTests: XCTestCase {
         XCTAssertEqual(Sessions.status(.busy, hook(.done)), .working)
     }
 
+    func testAHookNewerThanTheListDecides() {
+        // Listed idle at t=1000; a permission prompt opened at t=2000.
+        let row = LiveSession(sessionId: "s", startedAt: 0, status: "idle")
+        XCTAssertEqual(Sessions.merge(live: [row], polledAt: 1000, hooks: ["s": hook(.needsInput)]).first?.status, .needsInput)
+        // Listed waiting at t=1000; answered, and the turn finished at t=2000.
+        let waiting = LiveSession(sessionId: "s", startedAt: 0, status: "waiting")
+        XCTAssertEqual(Sessions.merge(live: [waiting], polledAt: 1000, hooks: ["s": hook(.done)]).first?.status, .yourTurn)
+        // Listed idle after the prompt (Esc): the list is newer and decides.
+        XCTAssertEqual(Sessions.merge(live: [row], polledAt: 3000, hooks: ["s": hook(.needsInput)]).first?.status, .yourTurn)
+    }
+
     func testAnEmptyNameFallsBackToTheHooksTitle() {
         var titled = hook(.done)
         titled.title = "fix login"
@@ -282,6 +293,19 @@ final class InstallerTests: XCTestCase {
         XCTAssertTrue(try String(contentsOf: real, encoding: .utf8).contains(HookInstaller.flag))
     }
 
+    func testFollowsASymlinkToSettingsNotWrittenYet() throws {
+        let real = dir.appendingPathComponent("dotfiles/settings.json")
+        try FileManager.default.createDirectory(at: real.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: settings.path, withDestinationPath: "dotfiles/settings.json")
+        XCTAssertTrue(try HookInstaller.install(executable: "/x/PixelWorkersHub", settings: settings, backups: backups))
+        XCTAssertTrue(try String(contentsOf: real, encoding: .utf8).contains(HookInstaller.flag))
+    }
+
+    func testRefusesAnEventItCantAddTo() throws {
+        try #"{"hooks":{"Stop":{}}}"#.write(to: settings, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try HookInstaller.install(executable: "/x/PixelWorkersHub", settings: settings, backups: backups))
+    }
+
     func testRefusesUnreadableSettings() throws {
         try existing.write(to: settings, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: settings.path)
@@ -304,6 +328,13 @@ final class CommandTests: XCTestCase {
         let start = Date()
         XCTAssertEqual(try Command.run("/bin/sh", ["-c", "sleep 30 & echo hi"], timeout: 5), "hi\n")
         XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+    }
+
+    func testStopsAProgramThatIgnoresSigterm() throws {
+        let marker = "pwh-sigterm-\(getpid())"
+        XCTAssertThrowsError(try Command.run("/bin/sh", ["-c", "trap '' TERM; exec -a \(marker) sleep 30"], timeout: 0.5))
+        let left = try? Command.run("/usr/bin/pgrep", ["-f", marker])
+        XCTAssertTrue(left?.isEmpty ?? true)
     }
 
     func testStopsAProgramPastItsTimeout() {

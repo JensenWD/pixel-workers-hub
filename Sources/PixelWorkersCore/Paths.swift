@@ -74,7 +74,11 @@ public enum Command {
         }
         if exited.wait(timeout: .now() + timeout) == .timedOut {
             process.terminate()
-            _ = exited.wait(timeout: .now() + 1)
+            // One that ignores SIGTERM isn't left running.
+            if exited.wait(timeout: .now() + 1) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                _ = exited.wait(timeout: .now() + 1)
+            }
         }
         if closed.wait(timeout: .now() + 1) == .timedOut {
             out.fileHandleForReading.readabilityHandler = nil

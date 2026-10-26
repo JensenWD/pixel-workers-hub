@@ -34,7 +34,7 @@ public enum HookInstaller {
     static func update(settings link: URL, backups: URL, command: String?, mode: String) throws -> Bool {
         let fm = FileManager.default
         // A settings.json linked in from a dotfiles repo is updated where it really lives.
-        let settings = link.resolvingSymlinksInPath()
+        let settings = resolve(link)
         // Missing means "no settings yet"; unreadable is an error, never a reason to start from scratch.
         let original = fm.fileExists(atPath: settings.path) ? try Data(contentsOf: settings) : nil
         let text = original.map { String(decoding: $0, as: UTF8.self) } ?? "{}"
@@ -60,6 +60,16 @@ public enum HookInstaller {
         return true
     }
 
+    /// Follows symlinks, including one to a file that doesn't exist yet.
+    static func resolve(_ url: URL) -> URL {
+        var current = url.standardizedFileURL
+        for _ in 0..<16 {
+            guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: current.path) else { return current }
+            current = URL(fileURLWithPath: target, relativeTo: current.deletingLastPathComponent()).standardizedFileURL
+        }
+        return current
+    }
+
     // JavaScript keeps the settings' key order, which Foundation's JSON parser would not.
     static let script = """
     function transform(text, command, mode, events, notifications, flag) {
@@ -77,9 +87,12 @@ public enum HookInstaller {
       const entry = event => Object.assign({ hooks: [{ type: 'command', command, timeout: 2 }] }, event === 'Notification' ? { matcher: notifications.join('|') } : {})
       const had = data.hooks !== undefined, before = Object.keys(hooks).length
       for (const event of new Set([...Object.keys(hooks), ...events])) {
-        // Anything that isn't a list of hook groups isn't ours to touch.
-        if (hooks[event] !== undefined && !Array.isArray(hooks[event])) continue
         const want = mode === 'install' && events.includes(event)
+        // Anything that isn't a list of hook groups isn't ours to touch.
+        if (hooks[event] !== undefined && !Array.isArray(hooks[event])) {
+          if (want) throw new Error(`settings.json has an unexpected "${event}" hook value. Nothing was changed.`)
+          continue
+        }
         const groups = []
         let present = false
         for (const g of hooks[event] ?? []) {

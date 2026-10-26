@@ -17,6 +17,8 @@ final class Store {
     // Everything below belongs to `queue`.
     private let queue = DispatchQueue(label: "pixel-workers-hub.store")
     private var live: [LiveSession]?
+    /// When `live` was fetched (ms). Hook files written after it are newer news than it is.
+    private var livePolledAt: Double = 0
     private var liveError: String?
     private var current = Snapshot()
     private var hosts: [Int32: String] = [:]
@@ -31,7 +33,8 @@ final class Store {
     private func update(full: Bool) {
         if full || live == nil {
             if let claude = Paths.claude() {
-                do { live = try Sessions.live(claude: claude); liveError = nil }
+                let polled = (Date().timeIntervalSince1970 * 1000).rounded()
+                do { live = try Sessions.live(claude: claude); livePolledAt = polled; liveError = nil }
                 catch { live = nil; liveError = "Claude Code didn’t list its sessions (\(error)). Try `claude update`." }
             } else {
                 live = nil
@@ -39,7 +42,7 @@ final class Store {
             }
         }
         // Older Claude Code has no list to ask; the hook's files still know which processes are running.
-        var sessions = live.map { Sessions.merge(live: $0, hooks: Hook.records()) } ?? Sessions.fromHooks(Hook.records())
+        var sessions = live.map { Sessions.merge(live: $0, polledAt: livePolledAt, hooks: Hook.records()) } ?? Sessions.fromHooks(Hook.records())
         let pids = Set(sessions.compactMap(\.pid))
         hosts = hosts.filter { pids.contains($0.key) }
         for i in sessions.indices {

@@ -57,14 +57,17 @@ public enum Sessions {
     }
 
     /// What the panel shows: Claude Code's live list, sharpened by the hook's more specific status when it has one.
-    public static func merge(live: [LiveSession], hooks: [String: HookRecord]) -> [Session] {
+    /// The list is polled, while hook files land the moment something happens, so a hook file written after
+    /// the list was fetched (`polledAt`, ms) is the newer word on what's on screen.
+    public static func merge(live: [LiveSession], polledAt: Double = 0, hooks: [String: HookRecord]) -> [Session] {
         live.map { row in
             let cwd = row.cwd ?? ""
             // A status file older than the process belongs to an earlier run that resumed this session.
             let hook = hooks[row.sessionId].flatMap { h in h.updatedAt >= (row.startedAt ?? 0) && h.status != .ended ? h : nil }
             return Session(id: row.sessionId, pid: row.pid, name: Hook.clean(row.name.flatMap { $0.isEmpty ? nil : $0 } ?? hook?.title ?? ""), cwd: cwd,
                            project: project(cwd), startedAt: row.startedAt ?? 0,
-                           status: status(row.activity, hook), since: hook?.updatedAt, terminal: nil)
+                           status: status(hook.map { $0.updatedAt > polledAt } == true ? nil : row.activity, hook),
+                           since: hook?.updatedAt, terminal: nil)
         }.sorted { ($0.startedAt, $0.id) < ($1.startedAt, $1.id) }
     }
 
