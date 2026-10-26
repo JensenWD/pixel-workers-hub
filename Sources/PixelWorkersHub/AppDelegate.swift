@@ -12,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     private var panel: PanelController!
     private var timer: Timer?
     private var notice: String?
+    /// Whether the detailed-status hooks are installed. Checked at launch, when the panel opens and after a
+    /// toggle, rather than on every render, since it means reading Claude Code's settings.
+    private var hooksOn = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -31,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
         store.onChange = { [weak self] in self?.show($0) }
         repairMovedHooks()
+        hooksOn = HookInstaller.installedExecutable() != nil
         store.watchHooks()
         store.refresh(full: true)
         schedule(every: 20)
@@ -42,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         let event = NSApp.currentEvent
         if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true { return showMenu() }
         if popover.isShown { return popover.performClose(nil) }
+        hooksOn = HookInstaller.installedExecutable() != nil
         store.refresh(full: true)
         guard let button = item.button else { return }
         NSApp.activate(ignoringOtherApps: true)
@@ -76,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     }
 
     private func render() {
-        panel.render(store.snapshot, hooks: HookInstaller.installedExecutable() == nil ? "off" : "on", notice: notice)
+        panel.render(store.snapshot, hooks: hooksOn ? "on" : "off", notice: notice)
         notice = nil
     }
 
@@ -117,7 +122,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
     private func optionsMenu() -> NSMenu {
         let menu = NSMenu()
-        let hooksOn = HookInstaller.installedExecutable() != nil
         menu.addItem(withTitle: "Refresh", action: #selector(refreshNow), keyEquivalent: "r").target = self
         menu.addItem(.separator())
         let hooks = menu.addItem(withTitle: "Detailed Status (Claude Code Hooks)", action: #selector(toggleHooksItem), keyEquivalent: "")
@@ -150,7 +154,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             if HookInstaller.installedExecutable() != nil {
                 try HookInstaller.remove()
                 try? FileManager.default.removeItem(at: Paths.sessions)
-                store.watchHooks()
                 notice = "Detailed status is off. Hooks were removed from Claude Code’s settings."
             } else {
                 guard let executable = Bundle.main.executablePath, !executable.contains("/AppTranslocation/") else {
@@ -162,6 +165,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         } catch {
             notice = error.localizedDescription
         }
+        hooksOn = HookInstaller.installedExecutable() != nil
+        // The status folder was just created or removed; watch the one that's there now.
+        store.watchHooks()
         store.refresh(full: false)
         render()
     }

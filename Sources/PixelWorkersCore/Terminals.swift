@@ -17,11 +17,12 @@ public struct FocusError: LocalizedError {
 public enum Terminals {
     public static let ghostty = "com.mitchellh.ghostty", iterm = "com.googlecode.iterm2", terminal = "com.apple.Terminal"
 
-    /// The app a process runs under: its nearest ancestor that's a regular app. tmux and screen detach
-    /// their sessions from the terminal, so those come back nil.
+    /// The app a process runs under: its nearest ancestor that's a regular app (one with a Dock icon).
+    /// Editors run their terminals in helper processes that are apps too, but can't be brought forward,
+    /// so those are skipped. tmux and screen detach their sessions from the terminal, so those come back nil.
     public static func host(of pid: Int32) -> NSRunningApplication? {
         for ancestor in Processes.lineage(of: pid).dropFirst() {
-            if let app = NSRunningApplication(processIdentifier: ancestor), app.bundleIdentifier != nil { return app }
+            if let app = NSRunningApplication(processIdentifier: ancestor), app.activationPolicy == .regular { return app }
         }
         return nil
     }
@@ -34,7 +35,7 @@ public enum Terminals {
             guard let pid = session.pid, let tty = Processes.tty(of: pid) else { throw FocusError(.notFound, "Couldn't find this session's tab.") }
             try run(app!.bundleIdentifier == iterm ? itermScript : terminalScript, [tty], app: app!.localizedName ?? "the terminal")
         case _? where app != nil:
-            app!.activate()
+            guard app!.activate() else { throw FocusError(.failed, "\(app!.localizedName ?? "That app") didn't come forward.") }
         default:
             // Under tmux the terminal isn't an ancestor; Ghostty can still be searched by title.
             if NSRunningApplication.runningApplications(withBundleIdentifier: ghostty).isEmpty {

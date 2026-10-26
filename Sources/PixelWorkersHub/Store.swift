@@ -38,7 +38,8 @@ final class Store {
                 liveError = "Couldn’t find the claude command. Point to it with: defaults write io.github.jensenwd.pixel-workers-hub claudePath /path/to/claude"
             }
         }
-        var sessions = Sessions.combine(live: live ?? [], hooks: Hook.records())
+        // Older Claude Code has no list to ask; the hook's files still know which processes are running.
+        var sessions = live.map { Sessions.merge(live: $0, hooks: Hook.records()) } ?? Sessions.fromHooks(Hook.records())
         let pids = Set(sessions.compactMap(\.pid))
         hosts = hosts.filter { pids.contains($0.key) }
         for i in sessions.indices {
@@ -71,6 +72,7 @@ final class Store {
             }
             source.setCancelHandler { close(fd) }
             source.resume()
+            watcher?.cancel()
             watcher = source
         }
     }

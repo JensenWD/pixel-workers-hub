@@ -46,7 +46,8 @@ public struct CommandError: Error, CustomStringConvertible {
 }
 
 public enum Command {
-    /// Runs a program with arguments (never through a shell) and returns its standard output.
+    /// Runs a program with arguments (never through a shell) and returns its standard output. Past the
+    /// timeout the program is stopped, and output still held open by anything it left running is abandoned.
     public static func run(_ path: String, _ arguments: [String], timeout: TimeInterval = 5) throws -> String {
         let process = Process(), out = Pipe(), err = Pipe()
         process.executableURL = URL(fileURLWithPath: path)
@@ -54,19 +55,35 @@ public enum Command {
         process.standardOutput = out
         process.standardError = err
         process.standardInput = FileHandle.nullDevice
-        try process.run()
-        let timer = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timer)
-        // Read both pipes before waiting, so a chatty program can't fill one and stall.
+
+        let lock = NSLock(), closed = DispatchGroup(), exited = DispatchSemaphore(value: 0)
         var output = Data(), errors = Data()
-        let group = DispatchGroup()
-        group.enter(); DispatchQueue.global().async { errors = err.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-        output = out.fileHandleForReading.readDataToEndOfFile()
-        group.wait()
-        process.waitUntilExit()
-        timer.cancel()
-        guard process.terminationStatus == 0 else {
-            throw CommandError(status: process.terminationStatus, stderr: String(decoding: errors, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+        for (pipe, isOutput) in [(out, true), (err, false)] {
+            closed.enter()
+            pipe.fileHandleForReading.readabilityHandler = { handle in
+                let chunk = handle.availableData
+                if chunk.isEmpty { handle.readabilityHandler = nil; closed.leave(); return }
+                lock.lock(); if isOutput { output.append(chunk) } else { errors.append(chunk) }; lock.unlock()
+            }
+        }
+        process.terminationHandler = { _ in exited.signal() }
+        do { try process.run() } catch {
+            out.fileHandleForReading.readabilityHandler = nil
+            err.fileHandleForReading.readabilityHandler = nil
+            throw error
+        }
+        if exited.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            _ = exited.wait(timeout: .now() + 1)
+        }
+        if closed.wait(timeout: .now() + 1) == .timedOut {
+            out.fileHandleForReading.readabilityHandler = nil
+            err.fileHandleForReading.readabilityHandler = nil
+        }
+        lock.lock(); defer { lock.unlock() }
+        guard !process.isRunning, process.terminationStatus == 0 else {
+            throw CommandError(status: process.isRunning ? -1 : process.terminationStatus,
+                               stderr: String(decoding: errors, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return String(decoding: output, as: UTF8.self)
     }

@@ -31,9 +31,12 @@ public enum HookInstaller {
         try update(settings: settings, backups: backups, command: nil, mode: "remove")
     }
 
-    static func update(settings: URL, backups: URL, command: String?, mode: String) throws -> Bool {
+    static func update(settings link: URL, backups: URL, command: String?, mode: String) throws -> Bool {
         let fm = FileManager.default
-        let original = try? Data(contentsOf: settings)
+        // A settings.json linked in from a dotfiles repo is updated where it really lives.
+        let settings = link.resolvingSymlinksInPath()
+        // Missing means "no settings yet"; unreadable is an error, never a reason to start from scratch.
+        let original = fm.fileExists(atPath: settings.path) ? try Data(contentsOf: settings) : nil
         let text = original.map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         let updated = try transform(text, command: command, mode: mode)
         if updated == text || original == nil && mode == "remove" { return false }
@@ -50,8 +53,10 @@ public enum HookInstaller {
         try Data(updated.utf8).write(to: temp)
         defer { try? fm.removeItem(at: temp) }
         // Fail closed if something else changed the file meanwhile.
-        if (try? Data(contentsOf: settings)) != original { throw InstallError("Claude Code's settings changed while updating them. Nothing was changed; try again.") }
-        _ = try fm.replaceItemAt(settings, withItemAt: temp)
+        let now = fm.fileExists(atPath: settings.path) ? try Data(contentsOf: settings) : nil
+        if now != original { throw InstallError("Claude Code's settings changed while updating them. Nothing was changed; try again.") }
+        if original == nil { try fm.moveItem(at: temp, to: settings) }
+        else { _ = try fm.replaceItemAt(settings, withItemAt: temp) }
         return true
     }
 
@@ -69,19 +74,27 @@ public enum HookInstaller {
         return ''
       }
       if (mode === 'install' && data.disableAllHooks) throw new Error('Hooks are turned off in Claude Code (disableAllHooks). Nothing was changed.')
+      const entry = event => Object.assign({ hooks: [{ type: 'command', command, timeout: 2 }] }, event === 'Notification' ? { matcher: notifications.join('|') } : {})
+      const had = data.hooks !== undefined, before = Object.keys(hooks).length
       for (const event of new Set([...Object.keys(hooks), ...events])) {
-        const groups = (Array.isArray(hooks[event]) ? hooks[event] : [])
-          .map(g => Array.isArray(g?.hooks) ? { ...g, hooks: g.hooks.filter(h => !ours(h)) } : g)
-          .filter(g => !Array.isArray(g?.hooks) || g.hooks.length)
-        if (mode === 'install' && events.includes(event)) {
-          const entry = { hooks: [{ type: 'command', command, timeout: 2 }] }
-          if (event === 'Notification') entry.matcher = notifications.join('|')
-          groups.push(entry)
+        // Anything that isn't a list of hook groups isn't ours to touch.
+        if (hooks[event] !== undefined && !Array.isArray(hooks[event])) continue
+        const want = mode === 'install' && events.includes(event)
+        const groups = []
+        let present = false
+        for (const g of hooks[event] ?? []) {
+          // An entry that's already exactly right stays where it is.
+          if (want && !present && JSON.stringify(g) === JSON.stringify(entry(event))) { groups.push(g); present = true; continue }
+          if (!Array.isArray(g?.hooks) || !g.hooks.some(ours)) { groups.push(g); continue }
+          const rest = g.hooks.filter(h => !ours(h))
+          if (rest.length) groups.push({ ...g, hooks: rest })
         }
+        if (want && !present) groups.push(entry(event))
         if (groups.length) hooks[event] = groups
-        else delete hooks[event]
+        // Only a list this emptied goes; one that was already empty is yours.
+        else if (hooks[event]?.length) delete hooks[event]
       }
-      if (Object.keys(hooks).length) data.hooks = hooks
+      if (Object.keys(hooks).length || had && !before) data.hooks = hooks
       else delete data.hooks
       return JSON.stringify(data, null, 2) + '\\n'
     }

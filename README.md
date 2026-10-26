@@ -79,16 +79,16 @@ your menu bar.
 
 ## Detailed status (optional)
 
-On its own, Claude Code only reports whether a session is busy or idle, so every idle session shows as
-**Your turn**. Click **Turn on detailed status** at the bottom of the panel to add a few
-[hooks](https://docs.claude.com/en/docs/claude-code/hooks) to `~/.claude/settings.json`. The panel can then
-tell these apart:
+On its own, Claude Code reports whether each session is busy, idle or waiting on a prompt, which covers
+the essentials. Click **Turn on detailed status** at the bottom of the panel to add a few
+[hooks](https://docs.claude.com/en/docs/claude-code/hooks) to `~/.claude/settings.json`. The panel then
+also knows why a turn ended, and updates the moment anything happens instead of on its next look:
 
 | Status | Meaning | Needs hooks |
 | --- | --- | :---: |
-| **Working** | Claude is working, or background tasks are still running | |
+| **Working** | Claude is working (with hooks: also while background tasks run) | |
 | **Your turn** | Claude finished and is waiting for your next message | |
-| **Needs you** | A permission prompt or a question is waiting for an answer | ✓ |
+| **Needs you** | A permission prompt or a question is waiting for an answer | |
 | **Failed** | The turn ended with an error, such as an API failure | ✓ |
 | **Ready** | A new or cleared session that hasn't been given anything yet | ✓ |
 
@@ -156,7 +156,9 @@ instead, turn off **Detailed Status** from the Options menu first, then quit the
 - **The session list** comes from `claude agents --json`, Claude Code's own list of what's running. It's
   polled every 3 seconds while the panel is open and every 20 seconds otherwise.
 - **The hooks' status files** are watched, so a permission prompt or a finished turn shows the moment it
-  happens, with no polling. They also cover a brand-new session that Claude Code hasn't listed yet.
+  happens, with no polling. Claude Code's list has the last word on what's on screen right now, so a
+  prompt dismissed with Esc (which fires no hook) still clears. On versions of Claude Code from before
+  `claude agents`, the status files alone list the sessions.
 - **Finding the tab:** the terminal is found by walking up from the Claude process to the app that
   started it. Ghostty tabs are matched by title and folder. iTerm2 and Terminal tabs are matched by tty.
 - **The panel** is a small web page (`Web/`) in a native popover. The pixel art is drawn as SVG from text

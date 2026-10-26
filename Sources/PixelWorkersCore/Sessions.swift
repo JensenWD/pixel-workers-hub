@@ -40,8 +40,9 @@ public struct LiveSession: Decodable, Equatable {
     var activity: Activity? {
         switch (kind == "interactive" ? status : state ?? status)?.lowercased() {
         case "busy", "running", "working": return .busy
-        case "idle", "waiting": return .idle
-        case "blocked", "needs_input", "needs-input": return .blocked
+        case "idle": return .idle
+        // "waiting" is a permission prompt or question on screen; background agents call it "blocked".
+        case "waiting", "blocked", "needs_input", "needs-input": return .blocked
         default: return nil
         }
     }
@@ -61,32 +62,27 @@ public enum Sessions {
             let cwd = row.cwd ?? ""
             // A status file older than the process belongs to an earlier run that resumed this session.
             let hook = hooks[row.sessionId].flatMap { h in h.updatedAt >= (row.startedAt ?? 0) && h.status != .ended ? h : nil }
-            return Session(id: row.sessionId, pid: row.pid, name: Hook.clean(row.name ?? hook?.title ?? ""), cwd: cwd,
+            return Session(id: row.sessionId, pid: row.pid, name: Hook.clean(row.name.flatMap { $0.isEmpty ? nil : $0 } ?? hook?.title ?? ""), cwd: cwd,
                            project: project(cwd), startedAt: row.startedAt ?? 0,
                            status: status(row.activity, hook), since: hook?.updatedAt, terminal: nil)
         }.sorted { ($0.startedAt, $0.id) < ($1.startedAt, $1.id) }
     }
 
-    /// Claude Code's list, plus sessions only the hook knows about. A new session isn't listed until Claude
-    /// Code registers it, which can be well into its first turn, and older Claude Code has no list at all.
-    public static func combine(live: [LiveSession], hooks: [String: HookRecord],
-                               isAlive: (Int32) -> Bool = Processes.isClaude, started: (Int32) -> Double? = Processes.startTime) -> [Session] {
-        let ids = Set(live.map(\.sessionId)), pids = Set(live.compactMap(\.pid))
-        let unlisted = hooks.filter { !ids.contains($0.key) && !pids.contains($0.value.pid ?? -1) }
-        return (merge(live: live, hooks: hooks) + fromHooks(unlisted, isAlive: isAlive, started: started))
-            .sorted { ($0.startedAt, $0.id) < ($1.startedAt, $1.id) }
-    }
-
-    /// Hook files whose Claude process is still running.
-    static func fromHooks(_ hooks: [String: HookRecord], isAlive: (Int32) -> Bool, started: (Int32) -> Double?) -> [Session] {
+    /// Hook files whose Claude process is still running: the list to show when Claude Code can't be asked
+    /// (versions before `claude agents`).
+    public static func fromHooks(_ hooks: [String: HookRecord],
+                                 isAlive: (Int32) -> Bool = Processes.isClaude, started: (Int32) -> Double? = Processes.startTime) -> [Session] {
         // /clear starts a new session in the same process; only its latest is still open.
         var latest: [Int32: Session] = [:]
         for h in hooks.values where h.status != .ended {
             guard let pid = h.pid, (latest[pid]?.since ?? 0) < h.updatedAt, isAlive(pid) else { continue }
+            // A file older than the process is from an earlier process that had the same ID.
+            let start = started(pid)
+            if let start, h.updatedAt < start { continue }
             latest[pid] = Session(id: h.sessionId, pid: pid, name: h.title ?? "", cwd: h.cwd ?? "", project: project(h.cwd ?? ""),
-                                  startedAt: started(pid) ?? h.updatedAt, status: status(nil, h), since: h.updatedAt, terminal: nil)
+                                  startedAt: start ?? h.updatedAt, status: status(nil, h), since: h.updatedAt, terminal: nil)
         }
-        return Array(latest.values)
+        return latest.values.sorted { ($0.startedAt, $0.id) < ($1.startedAt, $1.id) }
     }
 
     static func project(_ cwd: String) -> String {
@@ -94,19 +90,21 @@ public enum Sessions {
         return name.isEmpty ? "Claude Code" : name
     }
 
-    /// The CLI knows whether a session is busy or idle; the hook knows why it stopped. Hooks are more
-    /// specific, so the CLI only overrules them when they can't be right: a turn the hook still thinks is
-    /// running after Claude went idle was interrupted (Esc fires no hook), and that is the user's turn.
+    /// The CLI knows what's on screen right now: busy, idle, or waiting on a prompt. The hook knows why
+    /// a turn ended. So the CLI decides whenever it has a say, and the hook fills in the rest: a turn that
+    /// ended idle was finished, failed or never started. A hook still saying running or needs-input while
+    /// Claude is idle missed an Esc (which fires no hook), and that is the user's turn.
     static func status(_ live: LiveSession.Activity?, _ hook: HookRecord?) -> Session.Status {
         switch (live, hook?.status) {
-        case (.blocked, _), (_, .needsInput?): return .needsInput
+        case (.blocked, _): return .needsInput
         case (.busy, _): return .working
         case (_, .failed?): return .failed
         case (_, .done?): return .yourTurn
         case (_, .ready?): return .ready
         case (.idle, .running?): return hook!.backgroundCount > 0 ? .working : .yourTurn
-        case (nil, .running?): return .working
         case (.idle, _): return .yourTurn
+        case (nil, .needsInput?): return .needsInput
+        case (nil, .running?): return .working
         default: return .unknown
         }
     }

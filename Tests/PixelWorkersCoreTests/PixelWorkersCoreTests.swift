@@ -16,12 +16,25 @@ final class StatusTests: XCTestCase {
         XCTAssertEqual(Sessions.status(nil, nil), .unknown)
     }
 
+    func testAPermissionPromptIsWaitingInClaudeCodesList() {
+        // Observed: `claude agents` reports "waiting" while a permission dialog is open.
+        let row = LiveSession(sessionId: "s", status: "waiting")
+        XCTAssertEqual(Sessions.merge(live: [row], hooks: [:]).first?.status, .needsInput)
+    }
+
     func testHooksSayWhyClaudeStopped() {
         XCTAssertEqual(Sessions.status(.idle, hook(.done)), .yourTurn)
         XCTAssertEqual(Sessions.status(.idle, hook(.failed)), .failed)
         XCTAssertEqual(Sessions.status(.idle, hook(.ready)), .ready)
-        XCTAssertEqual(Sessions.status(.busy, hook(.needsInput)), .needsInput)
+        XCTAssertEqual(Sessions.status(nil, hook(.needsInput)), .needsInput)
         XCTAssertEqual(Sessions.status(nil, hook(.running)), .working)
+    }
+
+    func testClaudeCodesListOverrulesAPromptTheHookMissedTheEndOf() {
+        // Approved: the tool runs and Claude is busy until PostToolUse.
+        XCTAssertEqual(Sessions.status(.busy, hook(.needsInput)), .working)
+        // Dismissed with Esc, which fires no hook.
+        XCTAssertEqual(Sessions.status(.idle, hook(.needsInput)), .yourTurn)
     }
 
     func testAnInterruptedTurnIsYourTurn() {
@@ -32,6 +45,13 @@ final class StatusTests: XCTestCase {
 
     func testBusyOverrulesAFinishedHook() {
         XCTAssertEqual(Sessions.status(.busy, hook(.done)), .working)
+    }
+
+    func testAnEmptyNameFallsBackToTheHooksTitle() {
+        var titled = hook(.done)
+        titled.title = "fix login"
+        let merged = Sessions.merge(live: [LiveSession(sessionId: "s", name: "", startedAt: 0, status: "idle")], hooks: ["s": titled])
+        XCTAssertEqual(merged.first?.name, "fix login")
     }
 
     func testMergeIgnoresHookFilesFromAnEarlierRun() {
@@ -57,20 +77,15 @@ final class StatusTests: XCTestCase {
         current.pid = 42
         var gone = HookRecord(sessionId: "gone", status: .done, event: "Stop", updatedAt: 300)
         gone.pid = 43
-        let sessions = Sessions.combine(live: [], hooks: ["old": cleared, "new": current, "gone": gone], isAlive: { $0 == 42 }, started: { _ in 50 })
+        let sessions = Sessions.fromHooks(["old": cleared, "new": current, "gone": gone], isAlive: { $0 == 42 }, started: { _ in 50 })
         XCTAssertEqual(sessions.map(\.id), ["new"])
         XCTAssertEqual(sessions.first?.startedAt, 50)
     }
 
-    func testANewSessionShowsBeforeClaudeCodeListsIt() {
-        var fresh = HookRecord(sessionId: "fresh", status: .needsInput, event: "Notification", updatedAt: 300)
-        fresh.pid = 7
-        var cleared = HookRecord(sessionId: "before-clear", status: .done, event: "Stop", updatedAt: 100)
-        cleared.pid = 8
-        let live = [LiveSession(sessionId: "listed", pid: 8, startedAt: 10, status: "idle")]
-        let sessions = Sessions.combine(live: live, hooks: ["fresh": fresh, "before-clear": cleared], isAlive: { _ in true }, started: { _ in 20 })
-        XCTAssertEqual(sessions.map(\.id), ["listed", "fresh"])
-        XCTAssertEqual(sessions.last?.status, .needsInput)
+    func testAReusedProcessIdDoesntRaiseAnOldSession() {
+        var stale = HookRecord(sessionId: "stale", status: .running, event: "PreToolUse", updatedAt: 100)
+        stale.pid = 42
+        XCTAssertTrue(Sessions.fromHooks(["stale": stale], isAlive: { _ in true }, started: { _ in 5000 }).isEmpty)
     }
 }
 
@@ -233,8 +248,67 @@ final class InstallerTests: XCTestCase {
         XCTAssertThrowsError(try HookInstaller.install(executable: "/x/PixelWorkersHub", settings: settings, backups: backups))
     }
 
+    func testLeavesYourOwnOddEntriesAlone() throws {
+        let yours = #"{"hooks":{"Stop":[],"PreToolUse":[{"hooks":[]}],"Custom":"keep me"}}"#
+        try yours.write(to: settings, atomically: true, encoding: .utf8)
+        XCTAssertFalse(try HookInstaller.remove(settings: settings, backups: backups))
+        XCTAssertEqual(try String(contentsOf: settings, encoding: .utf8), yours)
+        try HookInstaller.install(executable: "/x/PixelWorkersHub", settings: settings, backups: backups)
+        try HookInstaller.remove(settings: settings, backups: backups)
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: settings)) as! [String: Any]
+        let hooks = json["hooks"] as! [String: Any]
+        XCTAssertEqual(hooks["Custom"] as? String, "keep me")
+        XCTAssertEqual((hooks["PreToolUse"] as? [Any])?.count, 1)
+    }
+
+    func testKeepsItsEntryInPlaceWhenAlreadyInstalled() throws {
+        try HookInstaller.install(executable: "/x/PixelWorkersHub", settings: settings, backups: backups)
+        var text = try String(contentsOf: settings, encoding: .utf8)
+        // Your hook added after ours, in the same event.
+        text = text.replacingOccurrences(of: "\"Stop\": [", with: "\"Stop\": [\n{ \"hooks\": [{ \"type\": \"command\", \"command\": \"say hi\" }] },", options: [], range: nil)
+        let json = try JSONSerialization.jsonObject(with: Data(text.utf8)) as! [String: Any]
+        let reordered = String(decoding: try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]), as: UTF8.self)
+        try reordered.write(to: settings, atomically: true, encoding: .utf8)
+        XCTAssertFalse(try HookInstaller.install(executable: "/x/PixelWorkersHub", settings: settings, backups: backups))
+    }
+
+    func testFollowsASymlinkedSettingsFile() throws {
+        let real = dir.appendingPathComponent("dotfiles/settings.json")
+        try FileManager.default.createDirectory(at: real.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try existing.write(to: real, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(atPath: settings.path, withDestinationPath: "dotfiles/settings.json")
+        XCTAssertTrue(try HookInstaller.install(executable: "/x/PixelWorkersHub", settings: settings, backups: backups))
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: settings.path), "dotfiles/settings.json")
+        XCTAssertTrue(try String(contentsOf: real, encoding: .utf8).contains(HookInstaller.flag))
+    }
+
+    func testRefusesUnreadableSettings() throws {
+        try existing.write(to: settings, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: settings.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: settings.path) }
+        XCTAssertThrowsError(try HookInstaller.install(executable: "/x/PixelWorkersHub", settings: settings, backups: backups))
+    }
+
     func testCreatesSettingsWhenThereAreNone() throws {
         XCTAssertTrue(try HookInstaller.install(executable: "/x/PixelWorkersHub", settings: settings, backups: backups))
         XCTAssertNotNil(HookInstaller.installedExecutable(settings: settings))
+    }
+}
+
+final class CommandTests: XCTestCase {
+    func testReturnsOutput() throws {
+        XCTAssertEqual(try Command.run("/bin/echo", ["hi"]), "hi\n")
+    }
+
+    func testDoesntWaitOnAChildLeftHoldingTheOutput() throws {
+        let start = Date()
+        XCTAssertEqual(try Command.run("/bin/sh", ["-c", "sleep 30 & echo hi"], timeout: 5), "hi\n")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+    }
+
+    func testStopsAProgramPastItsTimeout() {
+        let start = Date()
+        XCTAssertThrowsError(try Command.run("/bin/sleep", ["30"], timeout: 0.5))
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5)
     }
 }
