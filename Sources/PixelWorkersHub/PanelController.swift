@@ -30,10 +30,11 @@ final class PanelController: NSViewController, WKScriptMessageHandler, WKNavigat
         return FileManager.default.fileExists(atPath: source.path) ? source : nil
     }
 
-    func render(_ snapshot: Store.Snapshot, hooks: String, notice: String?) {
+    func render(_ snapshot: Store.Snapshot, hooks: String, theme: Theme, notice: String?) {
         var data: [String: Any] = [
             "sessions": (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot.sessions))) ?? [],
             "hooks": hooks,
+            "theme": theme.rawValue,
             "now": (Date().timeIntervalSince1970 * 1000).rounded(),
         ]
         if let error = snapshot.error { data["error"] = error }
@@ -71,6 +72,24 @@ private final class WeakHandler: NSObject, WKScriptMessageHandler {
     init(_ target: WKScriptMessageHandler) { self.target = target }
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         target?.userContentController(controller, didReceive: message)
+    }
+}
+
+/// The panel's look: light unless chosen otherwise in Options → Appearance.
+enum Theme: String, CaseIterable {
+    case light, dark, system
+    static var current: Theme {
+        get { UserDefaults.standard.string(forKey: "theme").flatMap(Theme.init) ?? .light }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "theme") }
+    }
+    var title: String { self == .system ? "Match System" : rawValue.capitalized }
+    /// For the popover's own frame and arrow.
+    var appearance: NSAppearance? {
+        switch self {
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        case .system: return nil
+        }
     }
 }
 

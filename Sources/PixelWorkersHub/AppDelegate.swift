@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         popover.behavior = .transient
         popover.animates = false
         popover.delegate = self
+        popover.appearance = Theme.current.appearance
 
         store.onChange = { [weak self] in self?.show($0) }
         repairMovedHooks()
@@ -81,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     }
 
     private func render() {
-        panel.render(store.snapshot, hooks: hooksOn ? "on" : "off", notice: notice)
+        panel.render(store.snapshot, hooks: hooksOn ? "on" : "off", theme: Theme.current, notice: notice)
         notice = nil
     }
 
@@ -127,6 +128,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         let hooks = menu.addItem(withTitle: "Detailed Status (Claude Code Hooks)", action: #selector(toggleHooksItem), keyEquivalent: "")
         hooks.target = self
         hooks.state = hooksOn ? .on : .off
+        let appearance = NSMenu()
+        for theme in Theme.allCases {
+            let choice = appearance.addItem(withTitle: theme.title, action: #selector(chooseTheme(_:)), keyEquivalent: "")
+            choice.target = self
+            choice.representedObject = theme.rawValue
+            choice.state = theme == Theme.current ? .on : .off
+        }
+        menu.addItem(withTitle: "Appearance", action: nil, keyEquivalent: "").submenu = appearance
         let login = menu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -137,6 +146,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     }
 
     @objc private func refreshNow() { store.refresh(full: true) }
+
+    @objc private func chooseTheme(_ item: NSMenuItem) {
+        guard let theme = (item.representedObject as? String).flatMap(Theme.init) else { return }
+        Theme.current = theme
+        popover.appearance = theme.appearance
+        render()
+    }
     @objc private func toggleHooksItem() { toggleHooks() }
     @objc private func about() { NSWorkspace.shared.open(repository) }
 

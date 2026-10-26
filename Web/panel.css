@@ -1,6 +1,8 @@
 :root{color-scheme:light;--paper:#f5f0e4;--ink:#292b27;--muted:#646257;--line:#cfc8b6;--wash:#eae5d7;--accent:#a8432c;--sage:#4d7a4f;--ochre:#9a6b16;
   --serif:Baskerville,'Iowan Old Style','Palatino Linotype',Georgia,serif;--sans:-apple-system,'Helvetica Neue',Arial,sans-serif}
-@media (prefers-color-scheme:dark){:root{color-scheme:dark;--paper:#22231f;--ink:#ece6d6;--muted:#a19d90;--line:#3d3e38;--wash:#2d2e29;--accent:#e57a5f;--sage:#8fc28c;--ochre:#d9a845}}
+/* Light unless Options → Appearance says otherwise. */
+:root[data-theme=dark]{color-scheme:dark;--paper:#22231f;--ink:#ece6d6;--muted:#a19d90;--line:#3d3e38;--wash:#2d2e29;--accent:#e57a5f;--sage:#8fc28c;--ochre:#d9a845}
+@media (prefers-color-scheme:dark){:root[data-theme=system]{color-scheme:dark;--paper:#22231f;--ink:#ece6d6;--muted:#a19d90;--line:#3d3e38;--wash:#2d2e29;--accent:#e57a5f;--sage:#8fc28c;--ochre:#d9a845}}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--paper);color:var(--ink);font:13px/1.45 var(--sans);-webkit-user-select:none;user-select:none;cursor:default}
 body{padding:10px 12px 8px}

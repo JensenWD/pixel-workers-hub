@@ -34,7 +34,7 @@ final class Shooter: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        let data = try! JSONSerialization.data(withJSONObject: ["sessions": demo, "hooks": "on", "now": now])
+        let data = try! JSONSerialization.data(withJSONObject: ["sessions": demo, "hooks": "on", "now": now, "theme": themes[0]])
         web.evaluateJavaScript("render(\(String(decoding: data, as: UTF8.self))); document.body.getBoundingClientRect().height") { height, _ in
             let height = (height as? Double) ?? 500
             self.window.setContentSize(NSSize(width: 360, height: height))

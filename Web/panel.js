@@ -32,6 +32,7 @@ function ago(ms, now) {
 
 let shown = []
 window.render = data => {
+  document.documentElement.dataset.theme = data.theme || 'light'
   shown = data.sessions
   const look = lookFor(shown)
   const counts = tallies.map(([state, many, one]) => [shown.filter(s => s.status === state).length, many, one]).filter(([n]) => n)

@@ -7,7 +7,7 @@ Click one and you're in its Ghostty tab.</p>
 
 <p align="center">
   <img src="docs/panel-light.png" width="360" alt="The panel in light mode: five sessions, each with a pixel worker at a desk and a status such as Needs you, Working or Your turn">
-  <img src="docs/panel-dark.png" width="360" alt="The same panel in dark mode">
+  <img src="docs/panel-dark.png" width="360" alt="The same panel with the dark appearance">
 </p>
 
 When you run several Claude Code sessions at once, it's easy to lose track of which one is waiting on a
@@ -76,6 +76,8 @@ your menu bar.
   iTerm2 or Terminal). Choose **Allow**. That permission is how it switches tabs. If you declined, turn it
   back on in **System Settings → Privacy & Security → Automation**.
 - **Open at Login** in the Options menu keeps it in your menu bar after a restart.
+- **Appearance** in the Options menu switches the panel from its light paper look to dark, or to follow
+  your Mac's setting.
 
 ## Detailed status (optional)
 
